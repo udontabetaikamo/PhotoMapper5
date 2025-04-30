@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>PhotoMapper3 デモ (事前データ読み込み版)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+  <style>
+    body{margin:0;font-family:sans-serif;}
+    #map{height:80vh;width:100%;}
+    #gallery{height:20vh;overflow-x:auto;white-space:nowrap;background:#f5f5f5;
+             display:flex;align-items:center;padding:8px;}
+    .thumb{height:100px;margin-right:8px;cursor:pointer;}
+    .thumb:hover{outline:2px solid #007bff;}
+    .control{position:absolute;top:8px;right:8px;z-index:1000;background:#fff;padding:6px 10px;border-radius:4px;box-shadow:0 0 4px rgba(0,0,0,0.3);}
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="gallery"></div>
+
+<script>
+// ユーザーが任意で変更できるクラスタリング半径 (km)
+const CLUSTER_RADIUS = 0.05;
+
+const map = L.map('map').setView([35.749,139.805],16);
+L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
+  {attribution:'© 地理院タイル',maxZoom:18}).addTo(map);
+
+const gallery = document.getElementById('gallery');
+
+fetch('photo-database.json')
+  .then(r=>r.json())
+  .then(data=>{
+    if(!Array.isArray(data)){alert('JSON形式が不正です');return;}
+    draw(data);
+  })
+  .catch(err=>{console.error(err);alert('photo-database.json が読み込めません');});
+
+function haversine(a,b){
+  const R=6371;
+  const toRad=x=>x*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat);
+  const dLon=toRad(b.lng-a.lng);
+  const s=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
+}
+
+function draw(photoData){
+  // クラスタリング
+  const groups={}, used=new Array(photoData.length).fill(false);
+  for(let i=0;i<photoData.length;i++){
+    if(used[i]||photoData[i].latitude==null)continue;
+    const base=photoData[i];
+    const key=base.latitude.toFixed(5)+','+base.longitude.toFixed(5);
+    const arr=[base]; used[i]=true;
+    for(let j=i+1;j<photoData.length;j++){
+      if(used[j]||photoData[j].latitude==null)continue;
+      if(haversine({lat:base.latitude,lng:base.longitude},
+                   {lat:photoData[j].latitude,lng:photoData[j].longitude})<=CLUSTER_RADIUS){
+        arr.push(photoData[j]); used[j]=True;}
+    }
+    groups[key]=arr;
+  }
+
+  // マーカー描画
+  for(const k in groups){
+    const group=groups[k];
+    const [lat,lng]=k.split(',').map(Number);
+    const size=Math.min(50,16+Math.log10(group.length+1)*12);
+    const icon=L.divIcon({
+      html:`<div style="background:rgba(0,120,255,0.85);color:#fff;
+             border:2px solid #fff;border-radius:50%;width:${size}px;height:${size}px;
+             display:flex;align-items:center;justify-content:center;
+             font-size:${size*0.45}px;font-weight:bold;">${group.length}</div>`,
+      className:'',iconSize:[size,size],iconAnchor:[size/2,size/2]});
+    const marker=L.marker([lat,lng],{icon}).addTo(map);
+
+    marker.on('click',()=>{
+      gallery.innerHTML='';
+      group.forEach(p=>{
+        const img=document.createElement('img');
+        img.src=p.filePath || p.url || '';
+        img.onerror=()=>{img.style.display='none';};
+        img.className='thumb'; img.title=p.fileName;
+        gallery.appendChild(img);
+      });
+    });
+  }
+}
+</script>
+</body>
+</html>
